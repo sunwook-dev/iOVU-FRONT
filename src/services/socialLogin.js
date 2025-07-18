@@ -8,7 +8,7 @@ import {
 } from "../utils/auth";
 
 // 환경 변수에서 API URL 가져오기, 없으면 에러 발생
-const API_BASE_URL = process.env.REACT_APP_API_URL;
+const API_BASE_URL = "http://localhost:8081";
 
 if (!API_BASE_URL) {
   console.error("REACT_APP_API_URL 환경 변수가 설정되지 않았습니다.");

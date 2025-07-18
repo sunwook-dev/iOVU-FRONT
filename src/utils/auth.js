@@ -1,7 +1,7 @@
 // 토큰 저장/삭제/조회 유틸리티 함수들
 
 // Configuration - 환경변수 사용 (socialLogin.js와 통일)
-const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8081";
+const API_BASE_URL = "http://localhost:8081";
 
 console.log("auth.js - API_BASE_URL:", API_BASE_URL);
 
