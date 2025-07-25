@@ -12,6 +12,7 @@ import {
   Divider,
   Chip,
   LinearProgress,
+  CircularProgress,
 } from "@mui/material";
 import { IoMdSend } from "react-icons/io";
 import { IoMdClose } from "react-icons/io";
@@ -21,25 +22,24 @@ import { useSidebar } from "../contexts/SidebarContext";
 
 const MY_AVATAR = "/static/images/avatar/1.jpg";
 const IOVU_AVATAR = "/static/images/avatar/2.jpg";
+const FASTAPI_BASE_URL = "http://localhost:8000";
 
 const Chat = () => {
   const messagesEndRef = useRef(null);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      user: "AI Assistant",
-      avatar: IOVU_AVATAR,
-      text: "안녕하세요! 무엇을 도와드릴까요?",
-      time: "10:30",
-      mine: false,
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
 
   // 리포트 관련 상태들
   const [showReport, setShowReport] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportData, setReportData] = useState(null);
+
+  // 챗봇 관련 상태들
+  const [currentStep, setCurrentStep] = useState("brand_name_ko");
+  const [sessionId] = useState(() => Math.random().toString(36).substring(7));
+  const [isLoading, setIsLoading] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [brandData, setBrandData] = useState(null);
 
   // Context에서 실제 사이드바 상태 가져오기
   const { isSidebarOpen } = useSidebar();
@@ -47,87 +47,9 @@ const Chat = () => {
   const SIDEBAR_WIDTH = 280;
   const COLLAPSED_SIDEBAR_WIDTH = 80;
 
-  // LLM이 자동으로 리포트 생성할지 판단
-  const shouldAutoGenerateReport = (currentMessages) => {
-    const messageCount = currentMessages.length;
-    const lastUserMessage = currentMessages[currentMessages.length - 1];
-
-    // 1. 사용자가 명시적으로 분석 요청한 경우
-    if (
-      lastUserMessage &&
-      (lastUserMessage.text.includes("분석") ||
-        lastUserMessage.text.includes("요약") ||
-        lastUserMessage.text.includes("정리") ||
-        lastUserMessage.text.includes("보고서") ||
-        lastUserMessage.text.includes("리포트"))
-    ) {
-      return true;
-    }
-
-    // 2. LLM이 충분한 정보가 모였다고 판단하는 경우들
-
-    // 메시지가 8개 이상이고 다양한 주제가 논의된 경우
-    if (messageCount >= 8) {
-      return true;
-    }
-
-    // 메시지가 6개 이상이고 사용자의 질문이 복잡하거나 심화된 경우
-    if (messageCount >= 6) {
-      const recentUserMessages = currentMessages
-        .filter((msg) => msg.mine)
-        .slice(-3)
-        .map((msg) => msg.text);
-
-      // 질문의 복잡도나 길이로 판단
-      const hasComplexQuestions = recentUserMessages.some(
-        (text) =>
-          text.length > 50 ||
-          text.includes("어떻게") ||
-          text.includes("왜") ||
-          text.includes("방법") ||
-          text.includes("차이") ||
-          text.includes("비교")
-      );
-
-      if (hasComplexQuestions) {
-        return true;
-      }
-    }
-
-    // 3. 특정 패턴의 대화가 지속된 경우 (예: 문제 해결, 학습, 상담 등)
-    if (messageCount >= 5) {
-      const conversationText = currentMessages
-        .slice(-4)
-        .map((msg) => msg.text)
-        .join(" ");
-
-      // 문제 해결 패턴
-      const isProblemSolving =
-        conversationText.includes("문제") ||
-        conversationText.includes("해결") ||
-        conversationText.includes("오류") ||
-        conversationText.includes("안됨");
-
-      // 학습/교육 패턴
-      const isLearning =
-        conversationText.includes("배우") ||
-        conversationText.includes("공부") ||
-        conversationText.includes("이해") ||
-        conversationText.includes("설명");
-
-      // 계획/전략 패턴
-      const isPlanning =
-        conversationText.includes("계획") ||
-        conversationText.includes("전략") ||
-        conversationText.includes("방향") ||
-        conversationText.includes("목표");
-
-      if (isProblemSolving || isLearning || isPlanning) {
-        return true;
-      }
-    }
-
-    return false;
+  // LLM이 자동으로 리포트 생성할지 판단 (브랜드 등록이 완료되면 리포트 생성)
+  const shouldAutoGenerateReport = () => {
+    return isComplete && brandData;
   };
 
   // 리포트 생성 트리거 키워드들
@@ -154,8 +76,61 @@ const Chat = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  useEffect(() => {
+    startChatbot();
+  }, []);
+
+  // 브랜드 등록 완료 시 리포트 생성
+  useEffect(() => {
+    if (isComplete && brandData && !reportData) {
+      autoGenerateReport();
+    }
+  }, [isComplete, brandData]);
+
+  const startChatbot = async () => {
+    try {
+      const response = await fetch(`${FASTAPI_BASE_URL}/chatbot/start`);
+      const data = await response.json();
+
+      setMessages([
+        {
+          id: 1,
+          user: "브랜드 등록 봇",
+          avatar: IOVU_AVATAR,
+          text: data.message,
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          mine: false,
+        },
+      ]);
+      setCurrentStep(data.step);
+    } catch (error) {
+      console.error("챗봇 시작 실패:", error);
+      setMessages([
+        {
+          id: 1,
+          user: "브랜드 등록 봇",
+          avatar: IOVU_AVATAR,
+          text: "죄송합니다. 서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.",
+          time: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          mine: false,
+        },
+      ]);
+    }
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading || isComplete) return; // isComplete 조건 추가
+
     const newMessage = {
       id: messages.length + 1,
       user: "나",
@@ -167,13 +142,66 @@ const Chat = () => {
       }),
       mine: true,
     };
-    setMessages([...messages, newMessage]);
-    setInput("");
 
-    // AI 응답 시뮬레이션 (실제로는 LLM API 호출)
-    setTimeout(() => {
-      simulateAIResponse([...messages, newMessage]);
-    }, 1000);
+    setMessages((prev) => [...prev, newMessage]);
+
+    const messageToSend = input;
+    setInput(""); // 입력 필드를 먼저 비우고
+    setIsLoading(true); // 그 다음에 로딩 상태 설정
+
+    try {
+      const response = await fetch(`${FASTAPI_BASE_URL}/chatbot`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: messageToSend,
+          session_id: sessionId,
+          step: currentStep,
+        }),
+      });
+
+      const data = await response.json();
+
+      const botMessage = {
+        id: messages.length + 2,
+        user: "브랜드 등록 봇",
+        avatar: IOVU_AVATAR,
+        text: data.message,
+        time: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        mine: false,
+        data: data.data,
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+      setCurrentStep(data.step);
+
+      if (data.is_complete) {
+        setIsComplete(true);
+        setBrandData(data.data);
+        // 자동 재시작 제거 - 완료 상태 유지
+      }
+    } catch (error) {
+      console.error("메시지 전송 실패:", error);
+      const errorMessage = {
+        id: messages.length + 2,
+        user: "브랜드 등록 봇",
+        avatar: IOVU_AVATAR,
+        text: "죄송합니다. 오류가 발생했습니다. 다시 시도해주세요.",
+        time: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        mine: false,
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // AI 응답 시뮬레이션 함수
@@ -252,42 +280,42 @@ const Chat = () => {
     }
   };
 
-  // LLM이 자동으로 리포트 생성
-  const autoGenerateReport = (currentMessages) => {
-    setIsGeneratingReport(true);
+  // 브랜드 등록 완료 시 리포트 생성
+  const autoGenerateReport = () => {
+    if (!brandData) return;
 
-    // 실제로는 여기서 LLM API를 호출해서 대화 내용을 분석
-    // 예: await analyzeConversation(currentMessages)
+    setIsGeneratingReport(true);
 
     setTimeout(() => {
       const generatedData = {
-        messageCount: currentMessages.length,
-        duration: `${Math.floor(currentMessages.length / 2)}분`,
-        sentiment: currentMessages.length > 3 ? "긍정적" : "중립적",
-        summary:
-          currentMessages.length > 3
-            ? "활발한 대화가 진행되었으며 다양한 주제에 대해 논의했습니다"
-            : "대화가 시작되었습니다",
-        keyPoints:
-          currentMessages.length > 3
-            ? [
-                "사용자와 AI 간의 원활한 소통",
-                "다양한 주제에 대한 질문과 답변",
-                "전반적으로 긍정적인 대화 분위기",
-                "추가적인 정보 요청이 활발함",
-              ]
-            : [
-                "대화 초기 단계",
-                "기본적인 인사와 질문",
-                "대화가 시작되었습니다",
-              ],
+        title: "브랜드 등록 완료 리포트",
+        createdAt: new Date().toLocaleString(),
+        brandInfo: {
+          nameKo: brandData.brand_name_ko,
+          nameEn: brandData.brand_name_en,
+          homepage: brandData.homepage_url,
+          instagram: brandData.instagram_id,
+          address: brandData.store_address,
+        },
+        summary: `${brandData.brand_name_ko} (${brandData.brand_name_en}) 브랜드가 성공적으로 등록되었습니다.`,
+        keyPoints: [
+          `브랜드명: ${brandData.brand_name_ko} (${brandData.brand_name_en})`,
+          `홈페이지: ${brandData.homepage_url}`,
+          `인스타그램: @${brandData.instagram_id}`,
+          `매장 위치: ${brandData.store_address}`,
+        ],
+        recommendations: [
+          "브랜드 정보가 모두 입력되었습니다.",
+          "소셜미디어 마케팅을 통한 브랜드 홍보를 고려해보세요.",
+          "고객 피드백 수집 시스템을 구축하는 것을 권장합니다.",
+        ],
+        status: "완료",
       };
 
       setReportData(generatedData);
       setIsGeneratingReport(false);
-      // 리포트가 생성되면 자동으로 사이드바 열기
       setShowReport(true);
-    }, 3000);
+    }, 2000);
   };
 
   // 토글 버튼으로 리포트 열고 닫기
@@ -298,7 +326,10 @@ const Chat = () => {
   const handleKeyPress = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (!isComplete) {
+        // 완료 상태가 아닐 때만 전송
+        handleSend();
+      }
     }
   };
 
@@ -338,7 +369,7 @@ const Chat = () => {
                   variant="h6"
                   sx={{ fontSize: "16px", fontWeight: 600 }}
                 >
-                  AI Assistant
+                  {isComplete ? "브랜드 등록 봇 (완료)" : "브랜드 등록 봇"}
                 </Typography>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <Box
@@ -346,11 +377,11 @@ const Chat = () => {
                       width: 8,
                       height: 8,
                       borderRadius: "50%",
-                      bgcolor: "#4caf50",
+                      bgcolor: isComplete ? "#ff9800" : "#4caf50",
                     }}
                   />
                   <Typography variant="caption" color="text.secondary">
-                    온라인
+                    {isComplete ? "등록 완료" : "온라인"}
                   </Typography>
                 </Box>
               </Box>
@@ -424,7 +455,11 @@ const Chat = () => {
                   >
                     <Typography
                       variant="body2"
-                      sx={{ fontSize: "14px", lineHeight: 1.4 }}
+                      sx={{
+                        fontSize: "14px",
+                        lineHeight: 1.4,
+                        whiteSpace: "pre-wrap", // 줄바꿈 지원
+                      }}
                     >
                       {message.text}
                     </Typography>
@@ -451,17 +486,32 @@ const Chat = () => {
             <TextField
               fullWidth
               variant="outlined"
-              placeholder="메시지를 입력하세요..."
+              placeholder={
+                isComplete
+                  ? "브랜드 등록이 완료되었습니다. 새로 시작하려면 페이지를 새로고침하세요."
+                  : "메시지를 입력하세요..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
+              disabled={isComplete} // isLoading 조건 제거
               multiline
               maxRows={4}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={handleSend} disabled={!input.trim()}>
-                      <IoMdSend />
+                    <IconButton
+                      onClick={handleSend}
+                      disabled={!input.trim() || isComplete} // isLoading 조건 제거
+                      sx={{
+                        color: !input.trim() || isComplete ? "#ccc" : "#1976d2",
+                      }}
+                    >
+                      {isLoading ? (
+                        <CircularProgress size={20} />
+                      ) : (
+                        <IoMdSend />
+                      )}
                     </IconButton>
                   </InputAdornment>
                 ),
@@ -609,7 +659,7 @@ const Chat = () => {
                 variant="h6"
                 sx={{ fontSize: "16px", fontWeight: 600 }}
               >
-                📊 대화 분석 리포트
+                🏢 {reportData?.title || "브랜드 등록 리포트"}
               </Typography>
               <IconButton onClick={toggleReport} size="small">
                 <IoMdClose />
@@ -620,257 +670,35 @@ const Chat = () => {
             <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
               {reportData && (
                 <>
-                  {/* 요약 섹션 */}
+                  {/* 등록 상태 표시 */}
                   <Paper
                     elevation={0}
                     sx={{
                       p: 2,
                       mb: 2,
-                      bgcolor: "#fff",
+                      bgcolor: "#e8f5e8",
                       borderRadius: 2,
-                      border: "1px solid #e0e0e0",
+                      border: "1px solid #4caf50",
                     }}
                   >
-                    <Typography
-                      variant="h6"
-                      sx={{ mb: 2, color: "#1976d2", fontSize: "14px" }}
-                    >
-                      📊 대화 요약
-                    </Typography>
-                    <Typography
-                      variant="body2"
-                      sx={{ fontSize: "12px", lineHeight: 1.4 }}
-                    >
-                      {reportData.summary}: 총 {reportData.messageCount}개의
-                      메시지가 교환되었으며, 전반적으로 {reportData.sentiment}{" "}
-                      분위기의 대화가 진행되었습니다.
-                    </Typography>
-                  </Paper>
-
-                  {/* 차트 영역 - 시간별 메시지 분포 */}
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      mb: 2,
-                      bgcolor: "#fff",
-                      borderRadius: 2,
-                      border: "1px solid #e0e0e0",
-                      height: "140px",
-                    }}
-                  >
-                    <Typography
-                      variant="h6"
-                      sx={{ mb: 1, color: "#1976d2", fontSize: "14px" }}
-                    >
-                      시간별 대화량 +
-                      {Math.floor((reportData.messageCount / 5) * 100)}%
-                    </Typography>
-                    <Box
-                      sx={{
-                        height: "80px",
-                        bgcolor: "#f8f9ff",
-                        borderRadius: 1,
-                        display: "flex",
-                        alignItems: "end",
-                        justifyContent: "space-around",
-                        p: 1,
-                      }}
-                    >
-                      {/* 메시지 수에 따른 동적 차트 */}
-                      {Array.from({ length: 5 }, (_, index) => (
-                        <Box
-                          key={index}
-                          sx={{
-                            width: "12px",
-                            height: `${Math.min(
-                              ((reportData.messageCount * (index + 1)) / 5) * 8,
-                              64
-                            )}px`,
-                            bgcolor: "#1976d2",
-                            borderRadius: "2px 2px 0 0",
-                          }}
-                        />
-                      ))}
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <AiOutlineCheck
+                        style={{ color: "#4caf50", fontSize: "16px" }}
+                      />
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          color: "#2e7d32",
+                        }}
+                      >
+                        등록 상태: {reportData.status}
+                      </Typography>
                     </Box>
                   </Paper>
 
-                  {/* 키워드 랭킹 */}
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      mb: 2,
-                      bgcolor: "#fff",
-                      borderRadius: 2,
-                      border: "1px solid #e0e0e0",
-                    }}
-                  >
-                    <Typography
-                      variant="h6"
-                      sx={{ mb: 2, color: "#1976d2", fontSize: "14px" }}
-                    >
-                      주요 키워드 랭킹
-                    </Typography>
-                    <Box
-                      sx={{ display: "flex", flexDirection: "column", gap: 1 }}
-                    >
-                      {[
-                        {
-                          keyword: "AI",
-                          count: reportData.messageCount * 20,
-                          color: "#1976d2",
-                        },
-                        {
-                          keyword: "도움",
-                          count: reportData.messageCount * 15,
-                          color: "#42a5f5",
-                        },
-                        {
-                          keyword: "질문",
-                          count: reportData.messageCount * 12,
-                          color: "#64b5f6",
-                        },
-                        {
-                          keyword: "정보",
-                          count: reportData.messageCount * 8,
-                          color: "#90caf9",
-                        },
-                      ].map((item, index) => (
-                        <Box
-                          key={index}
-                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                        >
-                          <Typography
-                            variant="caption"
-                            sx={{ minWidth: "20px", fontSize: "10px" }}
-                          >
-                            {index + 1}
-                          </Typography>
-                          <Box
-                            sx={{
-                              flex: 1,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 1,
-                            }}
-                          >
-                            <Typography
-                              variant="caption"
-                              sx={{ minWidth: "60px", fontSize: "10px" }}
-                            >
-                              {item.keyword}
-                            </Typography>
-                            <Box
-                              sx={{
-                                flex: 1,
-                                height: "8px",
-                                bgcolor: "#f0f0f0",
-                                borderRadius: "4px",
-                                overflow: "hidden",
-                              }}
-                            >
-                              <Box
-                                sx={{
-                                  width: `${Math.min(
-                                    (item.count /
-                                      (reportData.messageCount * 20)) *
-                                      100,
-                                    100
-                                  )}%`,
-                                  height: "100%",
-                                  bgcolor: item.color,
-                                }}
-                              />
-                            </Box>
-                            <Typography
-                              variant="caption"
-                              sx={{ fontSize: "10px", color: "#666" }}
-                            >
-                              {item.count}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Paper>
-
-                  {/* 감정 분석 */}
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      mb: 2,
-                      bgcolor: "#fff",
-                      borderRadius: 2,
-                      border: "1px solid #e0e0e0",
-                    }}
-                  >
-                    <Typography
-                      variant="h6"
-                      sx={{ mb: 2, color: "#1976d2", fontSize: "14px" }}
-                    >
-                      감정 분석 결과
-                    </Typography>
-                    <Box
-                      sx={{ display: "flex", flexDirection: "column", gap: 1 }}
-                    >
-                      {[
-                        {
-                          label: "Positive",
-                          value: reportData.sentiment === "긍정적" ? 70 : 40,
-                          color: "#4caf50",
-                        },
-                        {
-                          label: "Neutral",
-                          value: reportData.sentiment === "긍정적" ? 25 : 55,
-                          color: "#9e9e9e",
-                        },
-                        {
-                          label: "Negative",
-                          value: reportData.sentiment === "긍정적" ? 5 : 5,
-                          color: "#f44336",
-                        },
-                      ].map((item, index) => (
-                        <Box
-                          key={index}
-                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                        >
-                          <Typography
-                            variant="caption"
-                            sx={{ fontSize: "10px", minWidth: "50px" }}
-                          >
-                            {item.label}
-                          </Typography>
-                          <Box
-                            sx={{
-                              flex: 1,
-                              height: "12px",
-                              bgcolor: "#f0f0f0",
-                              borderRadius: "6px",
-                              overflow: "hidden",
-                            }}
-                          >
-                            <Box
-                              sx={{
-                                width: `${item.value}%`,
-                                height: "100%",
-                                bgcolor: item.color,
-                              }}
-                            />
-                          </Box>
-                          <Typography
-                            variant="caption"
-                            sx={{ fontSize: "10px" }}
-                          >
-                            {item.value}%
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Paper>
-
-                  {/* 인사이트 분석 */}
+                  {/* 주요 인사이트 */}
                   <Paper
                     elevation={0}
                     sx={{
@@ -917,16 +745,161 @@ const Chat = () => {
                     </Box>
                   </Paper>
 
-                  <Box sx={{ textAlign: "center", mt: 2 }}>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      sx={{ borderRadius: 2, px: 3, fontSize: "11px" }}
-                      onClick={() => alert("상세 리포트를 다운로드합니다!")}
+                  {/* 생성중입니다 섹션 */}
+                  <Paper
+                    elevation={2}
+                    sx={{
+                      p: 3,
+                      mb: 2,
+                      bgcolor:
+                        "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                      borderRadius: 3,
+                      border: "2px solid #1976d2",
+                      position: "relative",
+                      overflow: "hidden",
+                      boxShadow: "0 8px 32px rgba(31, 38, 135, 0.37)",
+                      backdropFilter: "blur(4px)",
+                      background:
+                        "linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)",
+                      "&::before": {
+                        content: '""',
+                        position: "absolute",
+                        top: 0,
+                        left: "-100%",
+                        width: "100%",
+                        height: "100%",
+                        background:
+                          "linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)",
+                        animation: "shimmer 2s infinite",
+                        "@keyframes shimmer": {
+                          "0%": { left: "-100%" },
+                          "100%": { left: "100%" },
+                        },
+                      },
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 2,
+                        position: "relative",
+                        zIndex: 1,
+                      }}
                     >
-                      📄 상세 리포트 다운로드
-                    </Button>
-                  </Box>
+                      {/* 애니메이션 아이콘 */}
+                      <Box
+                        sx={{
+                          display: "flex",
+                          gap: 0.5,
+                          animation: "bounce 1.5s infinite",
+                          "@keyframes bounce": {
+                            "0%, 20%, 50%, 80%, 100%": {
+                              transform: "translateY(0)",
+                            },
+                            "40%": { transform: "translateY(-10px)" },
+                            "60%": { transform: "translateY(-5px)" },
+                          },
+                        }}
+                      >
+                        <Typography sx={{ fontSize: "24px" }}>🎨</Typography>
+                        <Typography sx={{ fontSize: "24px" }}>✨</Typography>
+                        <Typography sx={{ fontSize: "24px" }}>📊</Typography>
+                      </Box>
+
+                      {/* 메인 텍스트 */}
+                      <Typography
+                        variant="h6"
+                        sx={{
+                          fontSize: "16px",
+                          fontWeight: 700,
+                          color: "#1976d2",
+                          textAlign: "center",
+                          background:
+                            "linear-gradient(45deg, #1976d2, #42a5f5)",
+                          backgroundClip: "text",
+                          WebkitBackgroundClip: "text",
+                          WebkitTextFillColor: "transparent",
+                        }}
+                      >
+                        상세 리포트 생성중입니다
+                      </Typography>
+
+                      {/* 서브 텍스트 */}
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontSize: "12px",
+                          color: "#666",
+                          textAlign: "center",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        브랜드 분석 데이터를 기반으로
+                        <br />
+                        맞춤형 인사이트를 준비하고 있어요
+                        <br />
+                        <span style={{ fontSize: "10px", color: "#999" }}>
+                          ⏱️ 예상 소요시간: 약 5시간
+                        </span>
+                      </Typography>
+
+                      {/* 진행률 바 */}
+                      <Box sx={{ width: "100%", mt: 1 }}>
+                        <Box
+                          sx={{
+                            width: "100%",
+                            height: 8,
+                            bgcolor: "rgba(25, 118, 210, 0.1)",
+                            borderRadius: 4,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              height: "100%",
+                              bgcolor: "#1976d2",
+                              borderRadius: 4,
+                              animation: "progress 3s ease-in-out infinite",
+                              "@keyframes progress": {
+                                "0%": { width: "20%" },
+                                "50%": { width: "80%" },
+                                "100%": { width: "20%" },
+                              },
+                            }}
+                          />
+                        </Box>
+                      </Box>
+
+                      {/* 점 애니메이션 */}
+                      <Box sx={{ display: "flex", gap: 0.5, mt: 1 }}>
+                        {[0, 1, 2].map((index) => (
+                          <Box
+                            key={index}
+                            sx={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              bgcolor: "#1976d2",
+                              animation: `dot ${1.5}s infinite`,
+                              animationDelay: `${index * 0.2}s`,
+                              "@keyframes dot": {
+                                "0%, 80%, 100%": {
+                                  transform: "scale(0.8)",
+                                  opacity: 0.5,
+                                },
+                                "40%": {
+                                  transform: "scale(1.2)",
+                                  opacity: 1,
+                                },
+                              },
+                            }}
+                          />
+                        ))}
+                      </Box>
+                    </Box>
+                  </Paper>
                 </>
               )}
             </Box>
