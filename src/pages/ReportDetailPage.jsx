@@ -274,6 +274,14 @@ const ReportDetailPage = ({ reportId }) => {
    * 보고서 내용을 Word 문서(.docx)로 내보내는 함수입니다.
    * HTML을 Word 형식으로 변환하여 다운로드합니다.
    */
+  const handleExportHtml = () => {
+    const link = document.createElement('a');
+    link.href = '/data/final_complete_main_20250728_034600.html';
+    link.download = 'final_complete_main_20250728_034600.html';
+    link.click();
+    handleExportClose();
+  };
+
   const handleExportWord = async () => {
     if (!reportContentRef.current || !report) return;
 
@@ -720,6 +728,9 @@ const ReportDetailPage = ({ reportId }) => {
           </MenuItem>
           <MenuItem onClick={handleExportMD}>
             <Typography>MD 파일로 저장</Typography>
+          </MenuItem>
+          <MenuItem onClick={handleExportHtml}>
+            <Typography>HTML 예시 다운로드</Typography>
           </MenuItem>
         </Menu>
       </Box>
